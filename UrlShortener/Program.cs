@@ -75,6 +75,13 @@ app.MapGet("/{code}", async (string code, ApplicationDbContext dbContext, HttpCo
         return Results.NotFound();
     }
 
+    if (shortenedUrl.ExpirationDateUtc.HasValue &&
+        shortenedUrl.ExpirationDateUtc.Value < DateTime.UtcNow)
+    {
+        // Linkin bir tarihi var VE o tarih þu anki zamandan daha ESKÝ (yani süresi dolmuþ)
+        return Results.NotFound(new { Message = "Bu linkin süresi dolmuþ veya geçersizdir." });
+    }
+
     // --- YENÝ LOGLAMA KODU BURADA BAÞLIYOR ---
 
     // 1. IP Adresini al
@@ -124,6 +131,11 @@ app.MapPost("shorten", async (
         return Results.BadRequest("Geçersiz URL.");
     }
 
+    if (request.ExpiresInHours.HasValue && request.ExpiresInHours.Value <= 0)
+    {
+        return Results.BadRequest(new { Message = "Geçerlilik süresi (ExpiresInHours) 0'dan büyük olmalýdýr." });
+    }
+
     // --- YENÝ MANTIK BAÞLANGICI ---
     string code; // Kullanýlacak kodu tutacak deðiþken
 
@@ -166,7 +178,11 @@ app.MapPost("shorten", async (
         LongUrl = request.Url,
         Code = code, // 'code' deðiþkeni artýk ya özeldir ya da rastgeledir
         ShortUrl = shortUrl,
-        CreatedOnUtc = DateTime.UtcNow
+        CreatedOnUtc = DateTime.UtcNow,
+
+        ExpirationDateUtc = request.ExpiresInHours.HasValue
+            ? DateTime.UtcNow.AddHours(request.ExpiresInHours.Value) // Deðer varsa, þu anki saate o kadar saat ekle
+            : null
     };
 
     dbContext.ShortenedUrls.Add(shortenedUrl);
@@ -178,5 +194,5 @@ app.MapPost("shorten", async (
 app.Run();
 
 // API'mizin POST isteðinde body'den ne beklediðini tanýmlayan basit bir 'record'
-public record ShortenUrlRequest(string Url, string? CustomCode);
+public record ShortenUrlRequest(string Url, string? CustomCode, int? ExpiresInHours);
 public record UpdateUrlRequest(string NewLongUrl);

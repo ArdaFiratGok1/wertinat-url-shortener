@@ -18,7 +18,7 @@ public class ApplicationDbContext : DbContext
         {
             builder
                 .Property(s => s.Code)
-                .HasMaxLength(100);//en fazla 100 karakterlik bir kısaltma yazılabilir (https://.../ekip-basvuru-formu vb.)
+                .HasMaxLength(100);//100 karakter siniri, artirilabilir
 
             builder
                 .HasIndex(s => s.Code)

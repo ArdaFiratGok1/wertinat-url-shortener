@@ -2,17 +2,17 @@
 
 public class ClickLog
 {
-    [Key] // Birincil anahtar
+    [Key] 
     public Guid Id { get; set; }
 
     public DateTime ClickDateUtc { get; set; }
 
-    public string? IpAddress { get; set; } // Tıklayanın IP adresi (nullable)
+    public string? IpAddress { get; set; } 
 
-    public string? ReferrerUrl { get; set; } // Hangi siteden geldiği (nullable)
+    public string? ReferrerUrl { get; set; } 
 
-    public string? UserAgent { get; set; } // Hangi tarayıcı/cihaz (nullable)
+    public string? UserAgent { get; set; } 
 
-    // --- İlişkiyi kurmak için ---
-    public Guid ShortenedUrlId { get; set; } // Hangi kısa linkin tıklandığı
+    
+    public Guid ShortenedUrlId { get; set; } 
 }

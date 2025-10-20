@@ -10,11 +10,18 @@ builder.Services.AddSwaggerGen();
 
 builder.Services.AddScoped<UrlShorteningService>();//service scope edildi.
 
-// Veritabaný baðlantýsýný (DbContext) ekle
+
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    
+    await dbContext.Database.MigrateAsync();
+}
 
 
 
@@ -31,29 +38,29 @@ app.MapPut("/update/{code}", async (
     UpdateUrlRequest request,
     ApplicationDbContext dbContext) =>
 {
-    // 1. Gönderilen YENÝ URL'nin formatý geçerli mi?
-    if (!Uri.TryCreate(request.NewLongUrl, UriKind.Absolute, out _))
+    
+    if (!Uri.TryCreate(request.NewLongUrl, UriKind.Absolute, out _))//gönderilen yeni urlnin formatý geçerli mi kontrolü
     {
         return Results.BadRequest("Yeni hedef URL geçersiz.");
     }
 
-    // 2. Güncellenecek linki 'code' kullanarak veritabanýnda bul
+    
     var existingUrl = await dbContext.ShortenedUrls
         .SingleOrDefaultAsync(s => s.Code == code);
 
     if (existingUrl is null)
     {
-        // Bu koda sahip bir link yoksa, 404 dön
+        
         return Results.NotFound(new { Message = "Güncellenecek link bulunamadý." });
     }
 
-    // 3. Linkin hedefini (LongUrl) GÜNCELLE
+    
     existingUrl.LongUrl = request.NewLongUrl;
 
-    // 4. Deðiþikliði veritabanýna kaydet
+    
     await dbContext.SaveChangesAsync();
 
-    // 5. Baþarýlý olduðuna dair bir yanýt dön
+    
     return Results.Ok(new
     {
         Message = "Link hedefi baþarýyla güncellendi.",
@@ -62,9 +69,6 @@ app.MapPut("/update/{code}", async (
     });
 });
 
-// YÖNLENDÝRME ENDPOINT'Ý
-// Örn: GET http://localhost:5000/aBc12X
-// Parametrelere 'HttpContext httpContext' eklendiðine dikkat edin
 app.MapGet("/{code}", async (string code, ApplicationDbContext dbContext, HttpContext httpContext) =>
 {
     var shortenedUrl = await dbContext.ShortenedUrls
@@ -78,54 +82,46 @@ app.MapGet("/{code}", async (string code, ApplicationDbContext dbContext, HttpCo
     if (shortenedUrl.ExpirationDateUtc.HasValue &&
         shortenedUrl.ExpirationDateUtc.Value < DateTime.UtcNow)
     {
-        // Linkin bir tarihi var VE o tarih þu anki zamandan daha ESKÝ (yani süresi dolmuþ)
+        
         return Results.NotFound(new { Message = "Bu linkin süresi dolmuþ veya geçersizdir." });
     }
 
-    // --- YENÝ LOGLAMA KODU BURADA BAÞLIYOR ---
+    
+    var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString();//IP
 
-    // 1. IP Adresini al
-    var ipAddress = httpContext.Connection.RemoteIpAddress?.ToString();
 
-    // 2. Referer (Hangi siteden geldi) bilgisini al
-    //    Not: Baþlýðýn adý "Referer" (çift 'r' yok), bu standart bir yazým hatasýdýr.
-    var referrer = httpContext.Request.Headers["Referer"].ToString();
+    var referrer = httpContext.Request.Headers["Referer"].ToString();//hangi siteden
 
-    // 3. User-Agent (Tarayýcý/Cihaz) bilgisini al
-    var userAgent = httpContext.Request.Headers["User-Agent"].ToString();
 
-    // 4. Yeni bir ClickLog nesnesi oluþtur
+    var userAgent = httpContext.Request.Headers["User-Agent"].ToString();//tarayýcý-cihaz info
+
+ 
     var log = new ClickLog
     {
         Id = Guid.NewGuid(),
-        ShortenedUrlId = shortenedUrl.Id, // Hangi linkin týklandýðýný baðlýyoruz
+        ShortenedUrlId = shortenedUrl.Id,
         ClickDateUtc = DateTime.UtcNow,
         IpAddress = ipAddress,
-        ReferrerUrl = string.IsNullOrEmpty(referrer) ? null : referrer, // Boþsa null olarak kaydet
-        UserAgent = string.IsNullOrEmpty(userAgent) ? null : userAgent // Boþsa null olarak kaydet
+        ReferrerUrl = string.IsNullOrEmpty(referrer) ? null : referrer,
+        UserAgent = string.IsNullOrEmpty(userAgent) ? null : userAgent 
     };
 
-    // 5. Logu veritabanýna ekle ve kaydet
-    //    'await' kullanýyoruz ama yönlendirmeyi bekletmiyoruz (arka planda kaydeder)
+
     dbContext.ClickLogs.Add(log);
     await dbContext.SaveChangesAsync();
 
-    // --- YENÝ LOGLAMA KODU BURADA BÝTTÝ ---
-
-    // 6. Kullanýcýyý asýl URL'ye yönlendir
     return Results.Redirect(shortenedUrl.LongUrl);
 });
 
 
-// KISALTMA ENDPOINT'Ý
-// Örn: POST http://localhost:5000/shorten
+
 app.MapPost("shorten", async (
     ShortenUrlRequest request,
     UrlShorteningService urlShorteningService,
     ApplicationDbContext dbContext,
     HttpContext httpContext) =>
 {
-    // 1. URL geçerlilik kontrolü (Ayný)
+
     if (!Uri.TryCreate(request.Url, UriKind.Absolute, out _))
     {
         return Results.BadRequest("Geçersiz URL.");
@@ -136,13 +132,12 @@ app.MapPost("shorten", async (
         return Results.BadRequest(new { Message = "Geçerlilik süresi (ExpiresInHours) 0'dan büyük olmalýdýr." });
     }
 
-    // --- YENÝ MANTIK BAÞLANGICI ---
-    string code; // Kullanýlacak kodu tutacak deðiþken
+
+    string code;
 
     if (!string.IsNullOrEmpty(request.CustomCode))
     {
-        // 2. KULLANICI ÖZEL KOD GÖNDERDÝ
-        // Bu kodun veritabanýnda olup olmadýðýný kontrol et
+
         if (request.CustomCode.Length > 100)
         {
             return Results.BadRequest(new { Message = "Özel kod 100 karakterden uzun olamaz." });
@@ -153,22 +148,19 @@ app.MapPost("shorten", async (
 
         if (isTaken)
         {
-            // Varsa, hata dön
+
             return Results.BadRequest(new { Message = "Bu özel kod ('alias') zaten kullanýlýyor." });
         }
 
-        // Alýnmamýþsa, bu kodu kullan
+
         code = request.CustomCode;
     }
     else
     {
-        // 3. KULLANICI ÖZEL KOD GÖNDERMEDÝ
-        // Eskisi gibi rastgele bir kod üret
+
         code = await urlShorteningService.GenerateUniqueCode();
     }
-    // --- YENÝ MANTIK BÝTÝÞÝ ---
 
-    // 4. Linki oluþtur (Kalan kod ayný)
     var requestHost = httpContext.Request;
     var shortUrl = $"{requestHost.Scheme}://{requestHost.Host}/{code}";
 
@@ -176,12 +168,12 @@ app.MapPost("shorten", async (
     {
         Id = Guid.NewGuid(),
         LongUrl = request.Url,
-        Code = code, // 'code' deðiþkeni artýk ya özeldir ya da rastgeledir
+        Code = code, 
         ShortUrl = shortUrl,
         CreatedOnUtc = DateTime.UtcNow,
 
         ExpirationDateUtc = request.ExpiresInHours.HasValue
-            ? DateTime.UtcNow.AddHours(request.ExpiresInHours.Value) // Deðer varsa, þu anki saate o kadar saat ekle
+            ? DateTime.UtcNow.AddHours(request.ExpiresInHours.Value) 
             : null
     };
 
@@ -190,9 +182,9 @@ app.MapPost("shorten", async (
 
     return Results.Ok(shortenedUrl.ShortUrl);
 });
-// --- 4. Uygulamayý Çalýþtýr ---
+
 app.Run();
 
-// API'mizin POST isteðinde body'den ne beklediðini tanýmlayan basit bir 'record'
+
 public record ShortenUrlRequest(string Url, string? CustomCode, int? ExpiresInHours);
 public record UpdateUrlRequest(string NewLongUrl);
